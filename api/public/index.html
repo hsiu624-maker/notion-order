@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>訂單寫入 Notion</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Noto Sans TC', sans-serif; background: #f5f4f0; color: #1a1a1a; min-height: 100vh; padding: 2rem 1rem; }
+  .container { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 0.25rem; }
+  .subtitle { font-size: 13px; color: #888; margin-bottom: 2rem; }
+  .card { background: #fff; border-radius: 14px; border: 1px solid #e8e6e0; padding: 1.5rem; margin-bottom: 1rem; }
+  label { font-size: 12px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 8px; }
+  textarea { width: 100%; height: 220px; font-size: 13px; font-family: 'Courier New', monospace; padding: 12px; border: 1px solid #e0ddd8; border-radius: 8px; background: #faf9f7; color: #1a1a1a; resize: vertical; line-height: 1.7; outline: none; }
+  .btn-row { display: flex; gap: 10px; margin-top: 1rem; }
+  button { flex: 1; padding: 11px 16px; font-size: 14px; font-family: inherit; font-weight: 500; border-radius: 8px; cursor: pointer; border: 1px solid #e0ddd8; background: #fff; color: #1a1a1a; transition: all 0.15s; }
+  button:hover { background: #f5f4f0; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #sendBtn { background: #1a1a1a; color: #fff; border-color: #1a1a1a; display: none; }
+  .preview-card { display: none; background: #fff; border-radius: 14px; border: 1px solid #e8e6e0; padding: 1.5rem; margin-bottom: 1rem; }
+  .preview-title { font-size: 12px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
+  .field-row { display: flex; padding: 7px 0; border-bottom: 1px solid #f0ede8; font-size: 13px; gap: 12px; }
+  .field-row:last-child { border-bottom: none; }
+  .field-key { color: #999; width: 110px; flex-shrink: 0; }
+  .field-val { color: #1a1a1a; flex: 1; word-break: break-all; }
+  .status { display: none; font-size: 13px; padding: 10px 14px; border-radius: 8px; margin-bottom: 1rem; }
+  .status.success { background: #edf7ed; color: #2e7d32; border: 1px solid #c3e6c4; }
+  .status.warning { background: #fff8e1; color: #856404; border: 1px solid #ffeaa0; }
+  .status.danger  { background: #fdecea; color: #c0392b; border: 1px solid #f5c6cb; }
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="container">
+  <h1>訂單寫入 Notion</h1>
+  <p class="subtitle">貼上訂單文字，自動解析並寫入資料庫</p>
+  <div class="card">
+    <label>訂單文字</label>
+    <textarea id="orderInput" placeholder="把填好的訂單內容貼在這裡..."></textarea>
+    <div class="btn-row">
+      <button onclick="parseOrder()">解析訂單</button>
+      <button id="sendBtn" onclick="sendToNotion()">寫入 Notion</button>
+    </div>
+  </div>
+  <div class="status" id="statusMsg"></div>
+  <div class="preview-card" id="previewCard">
+    <div class="preview-title">解析結果</div>
+    <div id="previewContent"></div>
+  </div>
+</div>
+<script>
+const NOTION_TOKEN = 'ntn_L74032271619gOVjalvAbHRUDuVfOkbzM8DFU8nTSa5acp';
+const DATABASE_ID = '3571b94448198033be43fe2332347503';
+const fieldMap = [
+  { label: '客戶名稱', key: '客戶名稱', type: 'title' },
+  { label: '電話', key: '電話', type: 'phone_number' },
+  { label: '地址', key: '地址', type: 'rich_text' },
+  { label: '購買日期', key: '購買日期', type: 'date' },
+  { label: '產品組合', key: '產品組合', type: 'rich_text' },
+  { label: '機器序號', key: '機器序號', type: 'rich_text' },
+  { label: '加購商品', key: '加購商品', type: 'rich_text' },
+  { label: '加購商品金額', key: '加購商品金額', type: 'number' },
+  { label: '贈品', key: '贈品', type: 'rich_text' },
+  { label: '安裝方式', key: '安裝方式', type: 'rich_text' },
+  { label: '付款方式', key: '付款方式', type: 'rich_text' },
+  { label: '銷售金額', key: '銷售金額', type: 'number' },
+  { label: '工資', key: '工資', type: 'number' },
+  { label: '折讓', key: '折讓', type: 'number' },
+  { label: '付款金額', key: '付款金額', type: 'number' },
+  { label: '發票號碼', key: '發票號碼', type: 'rich_text' },
+  { label: '銷售櫃位', key: '銷售櫃位', type: 'rich_text' },
+  { label: '訂單性質', key: '訂單性質', type: 'rich_text' },
+  { label: '安裝日期', key: '安裝日期', type: 'date' },
+  { label: '安裝師傅', key: '安裝師傅', type: 'rich_text' },
+  { label: '備註', key: '備註', type: 'rich_text' },
+];
+let parsedData = {};
+function extractValue(line, key) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp('^' + escaped + '\\s*[：:]+\\s*(.*)');
+  const match = line.match(regex);
+  return match ? match[1].trim() : null;
+}
+function normalizeDate(val) {
+  const m = val.match(/(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+  if (m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+  return null;
+}
+function parseOrder() {
+  const text = document.getElementById('orderInput').value;
+  if (!text.trim()) { showStatus('請先貼上訂單文字', 'warning'); return; }
+  parsedData = {};
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  for (const field of fieldMap) {
+    for (const line of lines) {
+      const val = extractValue(line, field.key);
+      if (val !== null && val !== '') { parsedData[field.label] = val; break; }
+    }
+  }
+  const preview = document.getElementById('previewContent');
+  preview.innerHTML = '';
+  let count = 0;
+  for (const field of fieldMap) {
+    const v = parsedData[field.label];
+    if (v) {
+      count++;
+      preview.innerHTML += `<div class="field-row"><span class="field-key">${field.label}</span><span class="field-val">${v}</span></div>`;
+    }
+  }
+  document.getElementById('previewCard').style.display = count > 0 ? 'block' : 'none';
+  document.getElementById('sendBtn').style.display = count > 0 ? 'block' : 'none';
+  showStatus(count > 0 ? '成功解析 ' + count + ' 個欄位' : '找不到欄位，請確認格式', count > 0 ? 'success' : 'warning');
+}
+async function sendToNotion() {
+  const btn = document.getElementById('sendBtn');
+  btn.textContent = '寫入中...';
+  btn.disabled = true;
+  const properties = {};
+  for (const field of fieldMap) {
+    const val = parsedData[field.label];
+    if (!val || val === '尚未指定' || val === '無') continue;
+    if (field.type === 'title') properties[field.label] = { title: [{ text: { content: val } }] };
+    else if (field.type === 'rich_text') properties[field.label] = { rich_text: [{ text: { content: val } }] };
+    else if (field.type === 'phone_number') properties[field.label] = { phone_number: val };
+    else if (field.type === 'number') { const num = parseInt(val.replace(/[^0-9]/g, '')); if (!isNaN(num)) properties[field.label] = { number: num }; }
+    else if (field.type === 'date') { const d = normalizeDate(val); if (d) properties[field.label] = { date: { start: d } }; else properties[field.label] = { rich_text: [{ text: { content: val } }] }; }
+  }
+  try {
+    const res = await fetch('/api/notion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: NOTION_TOKEN, database_id: DATABASE_ID, properties })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showStatus('✓ 成功寫入 Notion！', 'success');
+      document.getElementById('orderInput').value = '';
+      document.getElementById('previewCard').style.display = 'none';
+      btn.style.display = 'none';
+      parsedData = {};
+    } else {
+      showStatus('寫入失敗：' + (data.error || '未知錯誤'), 'danger');
+    }
+  } catch(e) {
+    showStatus('連線錯誤：' + e.message, 'danger');
+  }
+  btn.textContent = '寫入 Notion';
+  btn.disabled = false;
+}
+function showStatus(msg, type) {
+  const el = document.getElementById('statusMsg');
+  el.className = 'status ' + type;
+  el.style.display = 'block';
+  el.textContent = msg;
+}
+</script>
+</body>
+</html>
